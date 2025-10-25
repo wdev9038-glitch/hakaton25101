@@ -22,7 +22,7 @@
           class="relative p-2 rounded-full hover:bg-gray-100 transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
           <span 
             v-if="unlockedAchievements.length > 0" 
@@ -216,7 +216,7 @@
             >
               <div class="flex-shrink-0 w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mr-4">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-yellow-500" fill="none" viewBox="0 0 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 4-4m6 2a9 9 0 11-18 0 9 0 0118 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
               <div>
@@ -513,25 +513,24 @@ export default {
 
       this.isGenerating = true;
       try {
+        // 1. Получаем сгенерированные данные от бэкенда
         const response = await axios.post('/api/tasks/generate', {
           prompt: this.generationPrompt
         });
 
         const generatedTask = response.data.task;
 
-        // Заполняем форму сгенерированными данными
-        this.newTask = {
-          title: generatedTask.title || '',
-          description: generatedTask.description || '',
-          priority: generatedTask.priority || 'medium',
-          xp: generatedTask.xp || 10,
-          deadline: generatedTask.deadline || ''
-        };
+        // 2. Сразу создаем задачу на основе полученных данных
+        await axios.post('/api/tasks', {
+          title: generatedTask.title,
+          description: generatedTask.description,
+          priority: generatedTask.priority,
+          xp: parseInt(generatedTask.xp) || 10,
+          deadline: generatedTask.deadline || null
+        });
 
-        this.generationPrompt = '';
-
-        // Показываем уведомление об успехе
-        alert('Задача успешно сгенерирована! Проверьте и отредактируйте данные перед добавлением.');
+        this.generationPrompt = ''; // Очищаем поле
+        await this.fetchData(); // Обновляем доску
 
       } catch (error) {
         console.error('Ошибка при генерации задачи:', error);

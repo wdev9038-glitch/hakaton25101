@@ -13,93 +13,86 @@ app.use(bodyParser.json());
 app.use(express.static('client/dist'));
 
 // Настройка порта
-portfinder.getPort({
-  port: 3000,
-  stopPort: 4000
-}, (err, port) => {
+const PORT = 3000;
+
+// Подключение к SQLite
+const dbPath = path.join(__dirname, 'task-tracker.db');
+const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Error finding available port:', err);
-    process.exit(1);
+    console.error('Error opening database:', err);
+  } else {
+    console.log('Connected to SQLite database');
+
+    // Создание таблиц
+    db.run(`CREATE TABLE IF NOT EXISTS tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT DEFAULT 'todo',
+      priority TEXT DEFAULT 'medium',
+      xp INTEGER DEFAULT 10,
+      completed BOOLEAN DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME,
+      deadline DATETIME
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating tasks table:', err);
+      }
+    });
+
+    db.run(`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      xp INTEGER DEFAULT 0,
+      level INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating users table:', err);
+      }
+    });
+
+    db.run(`CREATE TABLE IF NOT EXISTS achievements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      icon TEXT,
+      unlocked BOOLEAN DEFAULT 0,
+      user_id INTEGER,
+      task_id INTEGER,
+      unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id),
+      FOREIGN KEY (task_id) REFERENCES tasks (id)
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating achievements table:', err);
+      }
+    });
+
+    // Создание таблицы истории задач
+    db.run(`CREATE TABLE IF NOT EXISTS task_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      field_changed TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (task_id) REFERENCES tasks (id)
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating task_history table:', err);
+      }
+    });
+
+    // Инициализация пользователя по умолчанию
+    db.run(`INSERT OR IGNORE INTO users (username, xp, level) VALUES ('default_user', 0, 1)`, (err) => {
+      if (err) {
+        console.error('Error initializing default user:', err);
+      }
+    });
   }
-
-  // Подключение к SQLite
-  const dbPath = path.join(__dirname, 'task-tracker.db');
-  const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) {
-      console.error('Error opening database:', err);
-    } else {
-      console.log('Connected to SQLite database');
-      
-      // Создание таблиц
-      db.run(`CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        description TEXT,
-        status TEXT DEFAULT 'todo',
-        priority TEXT DEFAULT 'medium',
-        xp INTEGER DEFAULT 10,
-        completed BOOLEAN DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        completed_at DATETIME,
-        deadline DATETIME
-      )`, (err) => {
-        if (err) {
-          console.error('Error creating tasks table:', err);
-        }
-      });
-
-      db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        xp INTEGER DEFAULT 0,
-        level INTEGER DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`, (err) => {
-        if (err) {
-          console.error('Error creating users table:', err);
-        }
-      });
-
-      db.run(`CREATE TABLE IF NOT EXISTS achievements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT,
-        icon TEXT,
-        unlocked BOOLEAN DEFAULT 0,
-        user_id INTEGER,
-        task_id INTEGER,
-        unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users (id),
-        FOREIGN KEY (task_id) REFERENCES tasks (id)
-      )`, (err) => {
-        if (err) {
-          console.error('Error creating achievements table:', err);
-        }
-      });
-
-      // Создание таблицы истории задач
-      db.run(`CREATE TABLE IF NOT EXISTS task_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id INTEGER NOT NULL,
-        field_changed TEXT NOT NULL,
-        old_value TEXT,
-        new_value TEXT,
-        changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (task_id) REFERENCES tasks (id)
-      )`, (err) => {
-        if (err) {
-          console.error('Error creating task_history table:', err);
-        }
-      });
-
-      // Инициализация пользователя по умолчанию
-      db.run(`INSERT OR IGNORE INTO users (username, xp, level) VALUES ('default_user', 0, 1)`, (err) => {
-        if (err) {
-          console.error('Error initializing default user:', err);
-        }
-      });
-    }
-  });
+});
 
   // API маршруты для задач
   // Получение всех задач
@@ -308,8 +301,8 @@ portfinder.getPort({
       }
 
       // Отправляем запрос к LM Studio
-      const response = await axios.post('http://127.0.0.1:1234/v1/chat/completions', {
-        model: 'local-model', // Укажите модель, если нужно
+      const response = await axios.post('http://localhost:1234/v1/chat/completions', {
+        model: 'google/gemma-3n-e4b', // Укажите модель, если нужно
         messages: [
           {
             role: 'system',
@@ -334,21 +327,10 @@ portfinder.getPort({
         return res.status(400).json({ error: 'Failed to parse generated task data' });
       }
 
-      // Сохраняем задачу в базу данных
-      const { title, description, priority = 'medium', xp = 10, deadline } = taskData;
-      const sql = 'INSERT INTO tasks (title, description, priority, xp, deadline) VALUES (?, ?, ?, ?, ?)';
-      const params = [title, description, priority, xp, deadline];
-
-      db.run(sql, params, function(err) {
-        if (err) {
-          res.status(400).json({ error: err.message });
-          return;
-        }
-        res.json({
-          message: 'Task generated and created successfully',
-          id: this.lastID,
-          task: taskData
-        });
+      // Просто возвращаем сгенерированные данные, не сохраняя их
+      res.json({
+        message: 'Task generated successfully',
+        task: taskData
       });
 
     } catch (error) {
@@ -363,18 +345,15 @@ portfinder.getPort({
   });
 
   // Запуск сервера
-  app.listen(port, () => {
-    console.log(`Task Tracker server running on port ${port}`);
+  app.listen(PORT, () => {
+    console.log(`Task Tracker server running on port ${PORT}`);
     console.log(`Database location: ${dbPath}`);
   });
-});
 
 // Функция проверки достижений
 function checkAchievements(db, taskXp) {
   // Проверяем достижение "Первая задача"
-  db.get(`SELECT COUNT(*) as count FROM tasks WHERE completed = 1 AND user_id = (
-    SELECT id FROM users WHERE username = 'default_user'
-  )`, (err, result) => {
+  db.get(`SELECT COUNT(*) as count FROM tasks WHERE completed = 1`, (err, result) => {
     if (err) return;
     
     if (result.count === 1) {
