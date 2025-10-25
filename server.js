@@ -35,11 +35,29 @@ const db = new sqlite3.Database(dbPath, (err) => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       completed_at DATETIME,
       deadline DATETIME
-    )`, (err) => {
-      if (err) {
-        console.error('Error creating tasks table:', err);
-      }
-    });
+   )`, (err) => {
+     if (err) {
+       console.error('Error creating tasks table:', err);
+     } else {
+       // Проверяем и добавляем колонку deadline, если ее нет (миграция)
+       db.all("PRAGMA table_info(tasks)", (err, columns) => {
+         if (err) {
+           console.error("Error checking table info:", err);
+           return;
+         }
+         const deadlineExists = columns.some(col => col.name === 'deadline');
+         if (!deadlineExists) {
+           db.run("ALTER TABLE tasks ADD COLUMN deadline DATETIME", (err) => {
+             if (err) {
+               console.error("Error adding deadline column:", err);
+             } else {
+               console.log("Column 'deadline' added to tasks table.");
+             }
+           });
+         }
+       });
+     }
+   });
 
     db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,11 +152,14 @@ const db = new sqlite3.Database(dbPath, (err) => {
   // Создание новой задачи
   app.post('/api/tasks', (req, res) => {
     const { title, description, priority = 'medium', xp = 10, deadline } = req.body;
+    console.log('POST /api/tasks received:', { title, description, priority, xp, deadline }); // Логирование
+
     const sql = 'INSERT INTO tasks (title, description, priority, xp, deadline) VALUES (?, ?, ?, ?, ?)';
     const params = [title, description, priority, xp, deadline];
     
     db.run(sql, params, function(err) {
       if (err) {
+        console.error('Error inserting task:', err.message); // Логирование ошибки
         res.status(400).json({ error: err.message });
         return;
       }
@@ -153,6 +174,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
   app.put('/api/tasks/:id', (req, res) => {
     const id = req.params.id;
     const { title, description, status, priority, completed, deadline } = req.body;
+    console.log('PUT /api/tasks/:id received:', { id, title, description, status, priority, completed, deadline }); // Логирование
 
     // Сначала получаем текущие данные задачи
     const getTaskSql = 'SELECT * FROM tasks WHERE id = ?';
@@ -181,6 +203,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
       db.run(sql, params, function(err) {
         if (err) {
+          console.error('Error updating task:', err.message); // Логирование ошибки
           res.status(400).json({ error: err.message });
           return;
         }
