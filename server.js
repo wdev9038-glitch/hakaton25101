@@ -409,14 +409,25 @@ const db = new sqlite3.Database(dbPath, (err) => {
         });
 
         const generatedText = response.data.choices[0].message.content;
+        console.log('Generated text from LLM:', generatedText); // Логирование ответа LLM
 
         // Парсим JSON из ответа
         let taskData;
         try {
-          taskData = JSON.parse(generatedText);
+          // Попробуем извлечь JSON из ответа, если он обернут в markdown или дополнительный текст
+          const jsonMatch = generatedText.match(/```json\s*([\s\S]*?)\s*```|```([\s\S]*?)\s*```|([\s\S]*)/);
+          const jsonString = jsonMatch && (jsonMatch[1] || jsonMatch[2] || jsonMatch[3]);
+          if (!jsonString) {
+            return res.status(400).json({ error: 'No valid JSON found in LLM response' });
+          }
+
+          taskData = JSON.parse(jsonString.trim());
         } catch (parseError) {
-          return res.status(400).json({ error: 'Failed to parse generated task data' });
+          console.error('Error parsing generated task data:', parseError.message);
+          return res.status(400).json({ error: 'Failed to parse generated task data', details: parseError.message });
         }
+
+        console.log('Parsed task data:', taskData); // Логирование распарсенного объекта
 
         // Просто возвращаем сгенерированные данные, не сохраняя их
         res.json({
