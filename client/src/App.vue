@@ -244,7 +244,7 @@
       <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div class="p-6">
           <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Просмотр задачи</h3>
+            <h3 class="text-lg font-semibold text-gray-800">Редактирование задачи</h3>
             <button @click="closeTaskModal" class="text-gray-500 hover:text-gray-700">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -254,38 +254,39 @@
 
           <div v-if="selectedTask" class="space-y-4">
             <div>
-              <h4 class="font-medium text-gray-800 text-lg">{{ selectedTask.title }}</h4>
-              <p class="text-gray-600 mt-1">{{ selectedTask.description }}</p>
+              <label class="block text-sm font-medium text-gray-700">Название</label>
+              <input v-model="editableTask.title" type="text" class="form-input mt-1">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Описание</label>
+              <textarea v-model="editableTask.description" class="form-input mt-1" rows="3"></textarea>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
               <div>
-                <span class="text-sm font-medium text-gray-500">Приоритет:</span>
-                <span class="ml-2 px-2 py-1 rounded-full text-xs"
-                      :class="{
-                        'bg-blue-100 text-blue-800': selectedTask.priority === 'low',
-                        'bg-yellow-100 text-yellow-800': selectedTask.priority === 'medium',
-                        'bg-red-100 text-red-800': selectedTask.priority === 'high'
-                      }">
-                  {{ selectedTask.priority === 'low' ? 'Низкий' : selectedTask.priority === 'medium' ? 'Средний' : 'Высокий' }}
-                </span>
+                <label class="block text-sm font-medium text-gray-700">Приоритет</label>
+                <select v-model="editableTask.priority" class="form-input mt-1">
+                  <option value="low">Низкий</option>
+                  <option value="medium">Средний</option>
+                  <option value="high">Высокий</option>
+                </select>
               </div>
               <div>
-                <span class="text-sm font-medium text-gray-500">XP:</span>
-                <span class="ml-2 text-sm text-gray-800">{{ selectedTask.xp }}</span>
-              </div>
-              <div v-if="selectedTask.deadline">
-                <span class="text-sm font-medium text-gray-500">Срок:</span>
-                <span class="ml-2 text-sm text-gray-800">{{ formatDate(selectedTask.deadline) }}</span>
+                <label class="block text-sm font-medium text-gray-700">XP</label>
+                <input v-model="editableTask.xp" type="number" class="form-input mt-1">
               </div>
               <div>
-                <span class="text-sm font-medium text-gray-500">Статус:</span>
-                <span class="ml-2 text-sm text-gray-800">{{ selectedTask.status }}</span>
+                <label class="block text-sm font-medium text-gray-700">Срок</label>
+                <input v-model="editableTask.deadline" type="date" class="form-input mt-1">
               </div>
+            </div>
+            
+            <div class="flex justify-end mt-6">
+              <button @click="saveTask" class="btn-primary">Сохранить</button>
             </div>
 
             <div>
-              <h4 class="font-medium text-gray-800 mb-2">История изменений</h4>
+              <h4 class="font-medium text-gray-800 mb-2 mt-6">История изменений</h4>
               <div v-if="taskHistory.length === 0" class="text-gray-500 text-sm">
                 Нет изменений
               </div>
@@ -345,6 +346,7 @@ export default {
       achievements: [],
       showTaskModal: false,
       selectedTask: null,
+      editableTask: {},
       taskHistory: [],
       generationPrompt: '',
       isGenerating: false,
@@ -482,6 +484,12 @@ export default {
       const task = this.tasks.find(t => t.id == taskId);
       if (task) {
         this.selectedTask = task;
+        // Клонируем объект для редактирования, чтобы не изменять оригинал до сохранения
+        this.editableTask = { ...task };
+        if (this.editableTask.deadline) {
+            // Преобразуем дату в формат YYYY-MM-DD для input[type=date]
+            this.editableTask.deadline = this.editableTask.deadline.split('T')[0];
+        }
         this.showTaskModal = true;
 
         // Загружаем историю задачи
@@ -497,7 +505,19 @@ export default {
     closeTaskModal() {
       this.showTaskModal = false;
       this.selectedTask = null;
+      this.editableTask = {};
       this.taskHistory = [];
+    },
+    async saveTask() {
+      if (!this.editableTask || !this.editableTask.id) return;
+
+      try {
+        await axios.put(`/api/tasks/${this.editableTask.id}`, this.editableTask);
+        this.closeTaskModal();
+        await this.fetchData();
+      } catch (error) {
+        console.error('Ошибка при сохранении задачи:', error);
+      }
     },
     formatDate(dateString) {
       if (!dateString) return '';
