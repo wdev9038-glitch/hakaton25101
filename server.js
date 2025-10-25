@@ -85,6 +85,27 @@ const db = new sqlite3.Database(dbPath, (err) => {
       }
     });
 
+    // Создание таблицы настроек
+    db.run(`CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating settings table:', err);
+      } else {
+        // Инициализация настроек по умолчанию
+        const defaultSettings = [
+          { key: 'llm_ip', value: 'http://localhost:1234' },
+          { key: 'llm_model', value: 'google/gemma-3n-e4b' }
+        ];
+        const stmt = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+        defaultSettings.forEach(setting => {
+          stmt.run(setting.key, setting.value);
+        });
+        stmt.finalize();
+      }
+    });
+
     // Инициализация пользователя по умолчанию
     db.run(`INSERT OR IGNORE INTO users (username, xp, level) VALUES ('default_user', 0, 1)`, (err) => {
       if (err) {
@@ -291,6 +312,39 @@ const db = new sqlite3.Database(dbPath, (err) => {
     });
   });
 
+  // API маршруты для настроек
+  app.get('/api/settings', (req, res) => {
+    db.all('SELECT * FROM settings', [], (err, rows) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      const settings = rows.reduce((acc, row) => {
+        acc[row.key] = row.value;
+        return acc;
+      }, {});
+      res.json({ message: 'success', data: settings });
+    });
+  });
+
+  app.post('/api/settings', (req, res) => {
+    const { llm_ip, llm_model } = req.body;
+    const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    if (llm_ip) {
+      stmt.run('llm_ip', llm_ip);
+    }
+    if (llm_model) {
+      stmt.run('llm_model', llm_model);
+    }
+    stmt.finalize((err) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      res.json({ message: 'Settings updated successfully' });
+    });
+  });
+
   // API маршрут для генерации задач с помощью LLM
   app.post('/api/tasks/generate', async (req, res) => {
     try {
@@ -300,39 +354,53 @@ const db = new sqlite3.Database(dbPath, (err) => {
         return res.status(400).json({ error: 'Prompt is required' });
       }
 
-      // Отправляем запрос к LM Studio
-      const response = await axios.post('http://localhost:1234/v1/chat/completions', {
-        model: 'google/gemma-3n-e4b', // Укажите модель, если нужно
-        messages: [
-          {
-            role: 'system',
-            content: 'Ты помощник по созданию задач. На основе описания пользователя создай задачу в формате JSON: {"title": "Название", "description": "Описание", "priority": "low|medium|high", "xp": 10, "deadline": "YYYY-MM-DD"}. Учитывай приоритет и XP на основе сложности.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 200,
-        temperature: 0.7
+      // Получаем настройки из БД
+      db.all('SELECT * FROM settings', [], async (err, rows) => {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+
+        const settings = rows.reduce((acc, row) => {
+          acc[row.key] = row.value;
+          return acc;
+        }, {});
+
+        const llmIp = settings.llm_ip || 'http://localhost:1234';
+        const llmModel = settings.llm_model || 'google/gemma-3n-e4b';
+
+        // Отправляем запрос к LM Studio
+        const response = await axios.post(`${llmIp}/v1/chat/completions`, {
+          model: llmModel,
+          messages: [
+            {
+              role: 'system',
+              content: 'Ты помощник по созданию задач. На основе описания пользователя создай задачу в формате JSON: {"title": "Название", "description": "Описание", "priority": "low|medium|high", "xp": 10, "deadline": "YYYY-MM-DD"}. Учитывай приоритет и XP на основе сложности.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 200,
+          temperature: 0.7
+        });
+
+        const generatedText = response.data.choices[0].message.content;
+
+        // Парсим JSON из ответа
+        let taskData;
+        try {
+          taskData = JSON.parse(generatedText);
+        } catch (parseError) {
+          return res.status(400).json({ error: 'Failed to parse generated task data' });
+        }
+
+        // Просто возвращаем сгенерированные данные, не сохраняя их
+        res.json({
+          message: 'Task generated successfully',
+          task: taskData
+        });
       });
-
-      const generatedText = response.data.choices[0].message.content;
-
-      // Парсим JSON из ответа
-      let taskData;
-      try {
-        taskData = JSON.parse(generatedText);
-      } catch (parseError) {
-        return res.status(400).json({ error: 'Failed to parse generated task data' });
-      }
-
-      // Просто возвращаем сгенерированные данные, не сохраняя их
-      res.json({
-        message: 'Task generated successfully',
-        task: taskData
-      });
-
     } catch (error) {
       console.error('Error generating task:', error);
       res.status(500).json({ error: 'Failed to generate task' });
